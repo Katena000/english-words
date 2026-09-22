@@ -90,6 +90,8 @@
   .rest-clock{font-size:64px;font-weight:800;font-variant-numeric:tabular-nums;
     font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:4px;
     margin-bottom:26px;color:#4f46e5}
+  .rest-hint{font-size:14px;color:#858aa3;max-width:380px;margin-bottom:22px}
+  .rest-btn{padding:14px 28px;font-size:17px}
   .blitz-word{text-align:center;font-size:32px;font-weight:700;padding:18px 0;
     font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:2px;word-break:break-word}
   .blitz-opt{display:block;width:100%;padding:16px;background:#fff;
@@ -101,13 +103,42 @@
     border-radius:10px;margin-bottom:6px;background:#fdecec;color:#dc2626}
   .muted{color:#858aa3}
   .center{text-align:center}
+
+  .review-line{display:flex;align-items:center;gap:10px;padding:10px 12px;
+    border-radius:12px;margin-bottom:8px;background:#fff;
+    box-shadow:0 1px 3px rgba(20,20,50,.06)}
+  .review-line.current{box-shadow:inset 0 0 0 2px #4f46e5}
+  .review-line.ok{background:#eafbef}
+  .review-line.bad{background:#fdecec}
+  .review-num{font-weight:700;color:#858aa3;min-width:22px;text-align:right;flex:none}
+  .review-ru{font-size:16px;color:#1a1a2e;flex:none;min-width:130px}
+  .review-input{margin:0;padding:8px 12px;font-size:17px;
+    font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;
+    border:2px solid #dfe2ee;border-radius:10px;flex:1}
+  .review-input:focus{border-color:#4f46e5;outline:none}
+  .review-ok{color:#16a34a;font-weight:700;flex:1;
+    font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px}
+  .review-bad{color:#dc2626;flex:1;
+    font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;
+    text-decoration:line-through}
+  .review-bad-correct{color:#16a34a;font-weight:700;font-size:14px;margin-left:6px}
+
+  .resume-banner{background:#e6e2fd;border-radius:14px;padding:14px;
+    margin-bottom:12px;display:flex;gap:12px;align-items:center}
+  .resume-banner .rb-main{flex:1;min-width:0}
+  .resume-banner b{display:block;font-size:16px;margin-bottom:2px}
+  .resume-banner .rb-sub{font-size:13px;color:#4f46e5;opacity:.8}
+  .resume-banner button{padding:9px 14px;font-size:15px}
 </style>
 </head>
 <body>
 <div id="app" class="wrap"></div>
 <script>
-/* ---------- state ---------- */
-var KEY = 'english_site_v1';
+/* =========================================================
+   Учим английские слова — v2
+   ========================================================= */
+var KEY = 'english_site_v2';
+
 var state = {
   sets: [],
   view: 'library',
@@ -144,15 +175,31 @@ function plural(n,one,few,many){
 }
 
 /* ---------- storage ---------- */
-function save(){
-  try{ localStorage.setItem(KEY, JSON.stringify({sets:state.sets})); }catch(e){}
+function saveAll(){
+  try{
+    localStorage.setItem(KEY, JSON.stringify({
+      sets: state.sets,
+      train: state.train,
+      restUntil: state.restUntil
+    }));
+  }catch(e){}
 }
-function load(){
+function loadAll(){
   try{
     var raw = localStorage.getItem(KEY);
-    if(!raw) return false;
+    if(!raw){
+      var old = localStorage.getItem('english_site_v1');
+      if(old){
+        var od = JSON.parse(old);
+        state.sets = od.sets || [];
+        return true;
+      }
+      return false;
+    }
     var d = JSON.parse(raw);
     state.sets = d.sets || [];
+    state.train = d.train || null;
+    state.restUntil = d.restUntil || 0;
     return true;
   }catch(e){ return false; }
 }
@@ -173,7 +220,7 @@ function seed(){
       {en:'be in sight',  ru:'быть на виду'}
     ]
   }];
-  save();
+  saveAll();
 }
 
 /* ---------- speech ---------- */
@@ -203,7 +250,7 @@ function makeTrain(setId){
     setId: setId,
     startedAt: Date.now(),
     wordIdx: 0,
-    stage: 1,          // 1 | 2 | 'blitz' | 'test' | 'done'
+    stage: 1,
     attemptsOK: 0,
     lastInput: '',
     lastResult: null,
@@ -237,7 +284,10 @@ function render(){
     startTick();
     return;
   }
-  if(state.restUntil && Date.now() >= state.restUntil) state.restUntil = 0;
+  if(state.restUntil && Date.now() >= state.restUntil){
+    state.restUntil = 0;
+    saveAll();
+  }
 
   var html = '';
   if(state.view==='library') html = viewLibrary();
@@ -254,6 +304,7 @@ function viewRest(){
     '<div class="rest-sub">Приходи через 15 минут. Попей воды, разомнись, посмотри в окно.</div>'+
     '<div class="rest-clock" id="rest-clock">'+fmt(left)+'</div>'+
     '<div class="rest-hint">Когда время закончится, ты продолжишь с того же шага, где остановился.</div>'+
+    '<button class="btn-primary rest-btn" data-act="rest-finish">Я готов продолжить</button>'+
   '</div>';
 }
 
@@ -265,6 +316,7 @@ function startTick(){
       var elapsed = (Date.now()-t.startedAt)/1000;
       if(elapsed >= 30*60){
         state.restUntil = Date.now()+15*60*1000;
+        saveAll();
         render(); return;
       }
       var el = document.getElementById('timer-val');
@@ -279,7 +331,9 @@ function startTick(){
       var el2 = document.getElementById('rest-clock');
       if(el2) el2.textContent = fmt(l);
       if(Date.now() >= state.restUntil){
-        state.restUntil = 0; render();
+        state.restUntil = 0;
+        saveAll();
+        render();
       }
     }
   }, 500);
@@ -289,7 +343,7 @@ function startTick(){
 function viewLibrary(){
   var cards = '';
   if(state.sets.length===0){
-    cards = '<div class="empty center muted" style="padding:40px 20px">Пока пусто. Создайте первый список 👇</div>';
+    cards = '<div class="center muted" style="padding:40px 20px">Пока пусто. Создайте первый список 👇</div>';
   } else {
     cards = state.sets.map(function(s){
       return '<div class="card">'+
@@ -305,10 +359,37 @@ function viewLibrary(){
       '</div>';
     }).join('');
   }
+
+  var resume = '';
+  if(state.train){
+    var rs = state.sets.find(function(x){ return x.id===state.train.setId; });
+    if(rs){
+      var learned = state.train.wordIdx;
+      var totalS = rs.items.length;
+      var stageName = state.train.stage===1 ? 'этап 1 (пишем целиком)'
+                    : state.train.stage===2 ? 'этап 2 (с пропусками)'
+                    : state.train.stage==='blitz' ? 'переводы'
+                    : state.train.stage==='test' ? 'контрольный тест'
+                    : 'завершение';
+      resume = '<div class="resume-banner">'+
+        '<div class="rb-main">'+
+          '<b>Продолжить: '+esc(rs.title)+'</b>'+
+          '<div class="rb-sub">Выучено '+learned+' из '+totalS+' · '+stageName+'</div>'+
+        '</div>'+
+        '<button class="btn-primary" data-act="resume">Продолжить</button>'+
+        '<button data-act="discard-resume" style="padding:9px 12px">✕</button>'+
+      '</div>';
+    } else {
+      state.train = null;
+      saveAll();
+    }
+  }
+
   return '<h1>Учим английские слова</h1>'+
+    resume+
     cards+
     '<button class="btn-primary wide" data-act="new-set">+ Новый список</button>'+
-    '<div class="hint">Порядок строк в наборе = порядок изучения. Расставляйте от самого сложного к самому простому.</div>';
+    '<div class="hint">Порядок строк в наборе = порядок изучения.</div>';
 }
 
 /* ---------- editor ---------- */
@@ -351,7 +432,7 @@ function viewTrain(){
   else                      main = viewLearn(set, t);
 
   return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">'+
-      '<button class="btn-ghost" data-act="back-lib">← Назад</button>'+
+      '<button class="btn-ghost" data-act="back-lib">← В библиотеку</button>'+
       '<b>'+esc(set.title)+'</b>'+
     '</div>'+
     side + main;
@@ -464,25 +545,33 @@ function viewLearn(set, t){
           : '<button class="btn-primary wide" data-act="w-retry">Ещё раз</button>'));
 }
 
-/* --- повторение --- */
+/* --- повторение: слева русский, справа ввод английского --- */
 function viewReview(set, t){
-  var upto = t.wordIdx; // сколько слов надо повторить (индексы 0..upto-1)
+  var upto = t.wordIdx;
   var list = '';
   for(var i=0;i<upto;i++){
-    var st = '';
-    if(t.reviewResults[i]==='ok') st='ok';
-    else if(t.reviewResults[i]==='bad') st='bad';
-    if(i===t.reviewIdx) st='current';
-    var inner;
+    var cls = '';
+    if(t.reviewResults[i]==='ok') cls='ok';
+    else if(t.reviewResults[i]==='bad') cls='bad';
+    if(i===t.reviewIdx) cls='current';
+
+    var right = '';
     if(i < t.reviewIdx){
-      inner = '<span class="review-word">'+esc(set.items[i].en)+'</span>';
+      if(t.reviewResults[i]==='ok'){
+        right = '<span class="review-ok">'+esc(set.items[i].en)+'</span>';
+      } else {
+        right = '<span class="review-bad">'+esc(set.items[i].en)+'</span>';
+      }
     } else if(i === t.reviewIdx){
-      inner = '<input class="review-input" id="rev-input" value="'+esc(t.reviewInput)+'" placeholder="Повторите слово" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">';
+      right = '<input class="review-input" id="rev-input" value="'+esc(t.reviewInput)+'" placeholder="Напиши по-английски" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">';
     } else {
-      inner = '<span class="review-word">—</span>';
+      right = '<span class="muted">—</span>';
     }
-    list += '<div class="review-item '+st+'">'+
-      '<span class="review-num">'+(i+1)+'</span>'+inner+
+
+    list += '<div class="review-line '+cls+'">'+
+      '<span class="review-num">'+(i+1)+'.</span>'+
+      '<span class="review-ru">'+esc(set.items[i].ru || set.items[i].en)+'</span>'+
+      right+
     '</div>';
   }
 
@@ -497,9 +586,9 @@ function viewReview(set, t){
 
   return '<div class="wordcard">'+
       '<div class="stage-tag">Повторение · слово '+(t.reviewIdx+1)+' из '+upto+'</div>'+
-      '<div class="translation">Повторим все предыдущие слова, прежде чем учить новое</div>'+
+      '<div class="translation">Вспомни и напиши по-английски</div>'+
     '</div>'+
-    '<div class="review-list">'+list+'</div>'+
+    '<div>'+list+'</div>'+
     (t.reviewResult==='bad' ? '<div class="feedback bad">❌ Правильно: <b>'+esc(set.items[t.reviewIdx].en)+'</b></div>' : '')+
     (t.reviewResult==='ok' ? '<div class="feedback ok">✅ Верно</div>' : '')+
     btn;
@@ -529,7 +618,7 @@ function viewBlitz(set, t){
       '<div class="blitz-word">'+esc(w.en)+'</div>'+
       '<div class="translation">Выберите правильный перевод</div>'+
     '</div>'+
-    '<div class="blitz-opts">'+opts+'</div>'+
+    '<div>'+opts+'</div>'+
     (t.blitzPicked!==null ? '<button class="btn-primary wide" data-act="blitz-next">Дальше →</button>' : '');
 }
 
@@ -596,8 +685,11 @@ document.addEventListener('click', function(e){
   switch(act){
 
     case 'back-lib':
-      state.view='library'; state.editId=null; state.train=null;
-      render(); break;
+      state.view='library'; state.editId=null;
+      saveAll();
+      render();
+      break;
+
     case 'new-set':
       state.editId=null; state.view='editor'; render(); break;
     case 'edit-set':
@@ -606,7 +698,8 @@ document.addEventListener('click', function(e){
       var s = state.sets.find(function(x){return x.id===id;});
       if(s && confirm('Удалить набор «'+s.title+'»?')){
         state.sets = state.sets.filter(function(x){return x.id!==id;});
-        save(); render();
+        if(state.train && state.train.setId===id) state.train=null;
+        saveAll(); render();
       }
       break;
 
@@ -626,14 +719,35 @@ document.addEventListener('click', function(e){
       } else {
         state.sets.unshift({id:uid(), title:title, items:items});
       }
-      save(); state.view='library'; state.editId=null; render(); break;
+      saveAll(); state.view='library'; state.editId=null; render(); break;
 
     case 'start':
       var set = state.sets.find(function(x){return x.id===id;});
       if(!set || !set.items.length) break;
       state.train = makeTrain(id);
       state.view = 'train';
+      saveAll();
       render(); break;
+
+    case 'resume':
+      if(state.train){ state.view='train'; render(); }
+      break;
+
+    case 'discard-resume':
+      if(confirm('Удалить сохранённый прогресс?')){
+        state.train = null;
+        state.restUntil = 0;
+        saveAll();
+        render();
+      }
+      break;
+
+    case 'rest-finish':
+      // Досрочно завершить отдых
+      state.restUntil = 0;
+      saveAll();
+      render();
+      break;
 
     /* ---------- этап 1 и 2 ---------- */
     case 'w-check': {
@@ -644,12 +758,12 @@ document.addEventListener('click', function(e){
       if(!inp) break;
       var val = inp.value.trim();
       t.lastInput = val;
-      var correct = (t.stage===1) ? w.en : w.en;
-      if(val.toLowerCase() === correct.toLowerCase()){
+      if(val.toLowerCase() === w.en.toLowerCase()){
         t.lastResult = 'ok';
       } else {
         t.lastResult = 'bad';
       }
+      saveAll();
       render();
       break;
     }
@@ -657,6 +771,7 @@ document.addEventListener('click', function(e){
     case 'w-retry':
       state.train.lastResult = null;
       state.train.lastInput = '';
+      saveAll();
       render(); break;
 
     case 'w-next': {
@@ -668,28 +783,23 @@ document.addEventListener('click', function(e){
       if(t.stage===1){
         t.attemptsOK++;
         if(t.attemptsOK>=5){
-          // переходим на stage 2
           t.stage = 2;
           t.blankCount = 1;
-          t.attemptsOK = 5; // оставим на память
         }
       } else if(t.stage===2){
         var wlen = set3.items[t.wordIdx].en.length;
         var maxBlank = Math.max(1, wlen-2);
         if(t.blankCount >= maxBlank){
-          // слово пройдено целиком. Переходим к повторению перед следующим.
           if(t.wordIdx < set3.items.length-1){
             t.wordIdx++;
             t.stage = 1;
             t.attemptsOK = 0;
             t.blankCount = 1;
-            // запуск повторения
             t.reviewIdx = 0;
             t.reviewInput = '';
             t.reviewResult = null;
             t.reviewResults = [];
           } else {
-            // последнее слово выучено — переходим к блицу
             t.stage = 'blitz';
             startBlitz(set3, t);
           }
@@ -697,6 +807,7 @@ document.addEventListener('click', function(e){
           t.blankCount++;
         }
       }
+      saveAll();
       render();
       break;
     }
@@ -711,12 +822,14 @@ document.addEventListener('click', function(e){
       t.reviewInput = val2;
       var correctR = setR.items[t.reviewIdx].en;
       t.reviewResult = (val2.toLowerCase()===correctR.toLowerCase()) ? 'ok' : 'bad';
+      saveAll();
       render();
       break;
     }
     case 'rev-retry':
       state.train.reviewResult = null;
       state.train.reviewInput = '';
+      saveAll();
       render(); break;
 
     case 'rev-next': {
@@ -725,10 +838,10 @@ document.addEventListener('click', function(e){
       t.reviewIdx++;
       t.reviewInput = '';
       t.reviewResult = null;
-      // если прошли все предыдущие — отменяем режим повторения, начинаем учить новое
       if(t.reviewIdx >= t.wordIdx){
         t.reviewIdx = -1;
       }
+      saveAll();
       render();
       break;
     }
@@ -739,10 +852,10 @@ document.addEventListener('click', function(e){
       if(t.blitzPicked!==null) break;
       t.blitzPicked = idx;
       var picked = t.blitzOptions[idx];
-      // Учитываем только правильный ответ в прогрессе
       if(picked === t.blitzCorrect){
         t.blitzDone[t.blitzCurrent] = (t.blitzDone[t.blitzCurrent]||0)+1;
       }
+      saveAll();
       render();
       break;
     }
@@ -750,8 +863,8 @@ document.addEventListener('click', function(e){
       var t = state.train;
       var setB = state.sets.find(function(x){return x.id===t.setId;});
       t.blitzPicked = null;
-      // если это слово уже набрало 5 — переходим к следующему в очереди
       startBlitz(setB, t);
+      saveAll();
       render();
       break;
     }
@@ -767,6 +880,7 @@ document.addEventListener('click', function(e){
       t.testInput = '';
       t.testResult = null;
       t.testErrors = {};
+      saveAll();
       render(); break;
     }
     case 'test-check': {
@@ -784,11 +898,13 @@ document.addEventListener('click', function(e){
         t.testResult = 'bad';
         t.testErrors[idxT] = (t.testErrors[idxT]||0)+1;
       }
+      saveAll();
       render(); break;
     }
     case 'test-retry':
       state.train.testResult = null;
       state.train.testInput = '';
+      saveAll();
       render(); break;
 
     case 'test-next': {
@@ -799,30 +915,31 @@ document.addEventListener('click', function(e){
       if(t.testIdx >= t.testQueue.length){
         t.testPhase = 'report';
       }
+      saveAll();
       render(); break;
     }
 
     case 'test-retry-errors': {
       var t = state.train;
       var setE = state.sets.find(function(x){return x.id===t.setId;});
-      // Оставляем только слова с ошибками в наборе
       var errIdxs = Object.keys(t.testErrors).map(function(k){return +k;});
       var errItems = errIdxs.map(function(i){return setE.items[i];});
       if(errItems.length===0){
         alert('Ошибок не было — нечего повторять!');
         break;
       }
-      // Создаём новый набор и стартуем по нему
       var newSet = { id: uid(), title: setE.title + ' · работа над ошибками', items: errItems };
       state.sets.unshift(newSet);
-      save();
       state.train = makeTrain(newSet.id);
+      saveAll();
       render();
       break;
     }
 
     case 'finish':
-      state.view='library'; state.train=null; render(); break;
+      state.view='library'; state.train=null;
+      saveAll();
+      render(); break;
   }
 });
 
@@ -862,7 +979,6 @@ function makeHint(word, missing){
 }
 
 function renderErrInline(correct, input){
-  // Возвращает инлайн-представление слова с подсветкой
   var out = '';
   var max = Math.max(correct.length, input.length);
   for(var i=0;i<max;i++){
@@ -871,7 +987,7 @@ function renderErrInline(correct, input){
     if(c && u && c.toLowerCase()===u.toLowerCase()){
       out += esc(c);
     } else if(u){
-      out += '<span class="wrong">'+esc(u)+'</span>';
+      out += '<span class="wrong" style="color:#dc2626;text-decoration:line-through">'+esc(u)+'</span>';
     } else if(c){
       out += '<span class="blank">'+esc(c)+'</span>';
     }
@@ -899,34 +1015,27 @@ function renderErrBlock(correct, input){
 /* ---------- блиц-логика ---------- */
 function startBlitz(set, t){
   var total = set.items.length;
-  // строим очередь: каждое слово 5 раз, в разнобой
   var queue = [];
   for(var i=0;i<total;i++){
     for(var r=0;r<5;r++) queue.push(i);
   }
   queue = shuffle(queue);
-  // убираем уже закрытые (blitzDone=5)
   queue = queue.filter(function(i){ return (t.blitzDone[i]||0) < 5; });
 
   if(queue.length===0){
-    // Блиц завершён — переходим к тесту
     t.stage = 'done';
     t.blitzCurrent = null;
     return;
   }
 
-  // Находим следующее слово с разными "остатками", просто берём первое из очереди
-  // Но чтобы не было одного и того же подряд, ищем слово, отличное от предыдущего
   var pick = queue[0];
   if(t.blitzCurrent!==null && pick===t.blitzCurrent && queue.length>1){
-    // сдвинем
     for(var j=1;j<queue.length;j++){
       if(queue[j]!==t.blitzCurrent){ pick = queue[j]; break; }
     }
   }
 
   t.blitzCurrent = pick;
-  // Варианты: правильный + 2 случайных чужих
   var correct = set.items[pick].ru;
   var others = set.items.filter(function(_,i){ return i!==pick && set.items[i].ru; })
                        .map(function(it){ return it.ru; });
@@ -941,7 +1050,7 @@ function startBlitz(set, t){
    INIT
    ========================================================= */
 (function(){
-  var had = load();
+  var had = loadAll();
   if(!had || state.sets.length===0) seed();
   render();
 })();
